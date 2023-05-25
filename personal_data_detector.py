@@ -3,15 +3,13 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, Dataset
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, jaccard_score, matthews_corrcoef
 from tqdm import tqdm
 
-
-# Scikit-learn metrics imports
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score,jaccard_score, roc_auc_score, matthews_corrcoef
 
 
 def compute_metrics(y_true, y_pred, average='weighted'):
@@ -41,55 +39,40 @@ def compute_metrics(y_true, y_pred, average='weighted'):
     f1 = round(f1_score(y_true, y_pred, average=average), 3)
     jaccard = round(jaccard_score(y_true, y_pred, average=average), 3)
 
-    if len(np.unique(y_true)) > 1:
-        roc_auc = round(roc_auc_score(y_true, y_pred), 3)
-    else:
-        roc_auc = "Undefined"
+    # if len(np.unique(y_true)) > 1:
+    #     roc_auc = round(roc_auc_score(y_true, y_pred), 3)
+    # else:
+    #     roc_auc = "Undefined"
 
     matthews_corr = round(matthews_corrcoef(y_true, y_pred), 3)
-    return accuracy, precision, recall, f1, jaccard, roc_auc, matthews_corr
+    return accuracy, precision, recall, f1, jaccard, matthews_corr
 
-class NLP_Net(nn.Module):
+class NLPNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.hidden = nn.Linear(100, 64)
         self.relu = nn.ReLU()
-        self.output = nn.Linear(64, 3)
+        self.output = nn.Linear(64, 1)
 
     def forward(self, x):
-        x = self.relu(self.hidden(x))
-        x = self.output(x)
-        return x
+        return self.output(self.relu(self.hidden(x)))
 
 
-class Vect_Word_Dataset(Dataset):
+class VectWordDataset(Dataset):
     def __init__(self, words_vect, labels):
         self.words = words_vect
         self.labels = labels
 
     def __getitem__(self, idx):
-        vect = self.words[idx]
-        label = self.labels[idx]
-
-        return vect, label
+        return self.words[idx], self.labels[idx]
 
     def __len__(self):
         return len(self.words)
 
 
-def get_dataloader(vect_words,
-                   labels,
-                   batch_size=32,
-                   shuffle=True,
-                   num_workers=2,
-                   generator=None):
-    dataset = Vect_Word_Dataset(vect_words, labels)
-    dataloader = DataLoader(dataset,
-                            batch_size=batch_size,
-                            shuffle=shuffle,
-                            num_workers=num_workers,
-                            generator=generator)
-    return dataloader
+def get_dataloader(vect_words, labels, batch_size=32, shuffle=True, num_workers=0, generator=None):
+    dataset = VectWordDataset(vect_words, labels)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, generator=generator)
 
 
 def train_test_pt_model(model,
@@ -116,11 +99,11 @@ def train_test_pt_model(model,
         for inputs, target in progress_bar:
             inputs.view(inputs.shape[0], -1)
             inputs = inputs.to(device)
-            target = target.to(device)
+            target = target.to(device)  # tutaj zmieniamy operację squeeze
 
             model.zero_grad()
             output = model(inputs)
-            loss = criterion(output, target.float())
+            loss = criterion(output, target)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 3)
             optimizer.step()
@@ -155,7 +138,7 @@ def train_test_pt_model(model,
         epoch_test_acc = (test_acc / test_count) * 100
         test_epoch_acc.append(epoch_test_acc.item())
 
-        if not epoch % 10:
+        if not epoch % 2:
             train_metrics = compute_metrics(target.cpu().numpy(), pred.cpu().numpy())
             test_metrics = compute_metrics(test_target.cpu().numpy(), test_pred.cpu().numpy())
 
@@ -173,11 +156,11 @@ def train_test_pt_model(model,
         return train_losses, train_accs, test_losses, test_epoch_acc, epochs_loop
 
 
-# 5. Encoding of categorical variables
-def one_hot_encoding(df, columns):
-    df_encoded = pd.get_dummies(df, columns=columns, prefix=columns, prefix_sep='_')
-    df_encoded = df_encoded.astype(int)
-    return df_encoded
+# # 5. Encoding of categorical variables
+# def one_hot_encoding(df, columns):
+#     df_encoded = pd.get_dummies(df, columns=columns, prefix=columns, prefix_sep='_')
+#     df_encoded = df_encoded.astype(int)
+#     return df_encoded
 
 # 5. Encoding of categorical variables
 def one_hot_encoding(df, columns):
@@ -262,7 +245,7 @@ def main():
                                  num_workers=4,
                                  generator=generator)
 
-    pt_model = NLP_Net()
+    pt_model = NLPNet()
     pt_model.to(device) # Przenieś model na GPU, jeśli dostępne
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(pt_model.parameters(), lr=0.001)
@@ -272,7 +255,7 @@ def main():
                                                                                    test_loader,
                                                                                    criterion,
                                                                                    optimizer,
-                                                                                   epochs=30)
+                                                                                   epochs=10)
 
 if __name__ == '__main__':
     main()
